@@ -68,10 +68,12 @@ class UserService:
             new_user.role = UserRole.ADMIN if user_count == 0 else UserRole.ANONYMOUS            
             if new_user.role == UserRole.ADMIN:
                 new_user.email_verified = True
-            
+
+
             new_user.verification_token = generate_verification_token()
             session.add(new_user)
             await session.commit()
+            await email_service.send_verification_email(new_user)
             return new_user
         except ValidationError as e:
             logger.error(f"Validation error during user creation: {e}")
@@ -119,6 +121,7 @@ class UserService:
     async def register_user(cls, session: AsyncSession, user_data: Dict[str, str], get_email_service) -> Optional[User]:
         return await cls.create(session, user_data, get_email_service)
     
+
     @classmethod
     async def login_user(cls, session: AsyncSession, email: str, password: str) -> Optional[User]:
         user = await cls.get_by_email(session, email)
@@ -146,6 +149,7 @@ class UserService:
         user = await cls.get_by_email(session, email)
         return user.is_locked if user else False
 
+
     @classmethod
     async def reset_password(cls, session: AsyncSession, user_id: UUID, new_password: str) -> bool:
         hashed_password = hash_password(new_password)
@@ -166,7 +170,7 @@ class UserService:
             user.email_verified = True
             user.verification_token = None  # Clear the token once used
             if user.role == UserRole.ANONYMOUS:
-                user.role = UserRole.AUTHENTICATED
+                user.role - UserRole.AUTHENTICATED
             session.add(user)
             await session.commit()
             return True
