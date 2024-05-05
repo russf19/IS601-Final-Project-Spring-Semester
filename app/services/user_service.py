@@ -146,7 +146,6 @@ class UserService:
         user = await cls.get_by_email(session, email)
         return user.is_locked if user else False
 
-
     @classmethod
     async def reset_password(cls, session: AsyncSession, user_id: UUID, new_password: str) -> bool:
         hashed_password = hash_password(new_password)
