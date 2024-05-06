@@ -245,3 +245,40 @@ async def verify_email(user_id: UUID, token: str, db: AsyncSession = Depends(get
     if await UserService.verify_email_with_token(db, user_id, token):
         return {"message": "Email verified successfully"}
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+
+@router.patch("/users/(user_id)/profile" , response_model=UserResponse, tags=["User Profile Management"])
+async def update_profile(user_id: UUID, profile_data: UserUpdate, request: Request, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """
+    Allows a user to update their profile fields such as name, bio, and location.
+    """
+    if user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized to update this profile")
+    
+    updated_user = await UserService.update(db, user_id, profile_data.dict(exclude_unset=True))
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    return UserResponse.model_construct(
+        **updated_user.dict(),
+        links=create_user_links(updated_user.id, request)
+    )
+
+# Upgrade to professional status endpoint
+@router.post("/users/{user_id}/upgrade", tags=["User Management Requires (Admin or Manager Roles)"], status_code=status.HTTP_200_OK)
+async def upgrade_user_to_professional(user_id: UUID, db: AsyncSession = Depends(get_db), current_user: dict = Depends(require_role(["ADMIN", "MANAGER"]))):
+    """
+    Endpoint for managers and admins to upgrade a user to professional status.
+    """
+    user = await UserService.get_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    user.is_professional = True  # Assuming 'is_professional' is a valid attribute of the User model
+    db.add(user)
+    await db.commit()
+
+    # Notify the user
+    email_service = get_email_service()
+    await email_service.send_notification(user.email, "Your professional status has been updated.")
+
+    return {"message": f"User {user_id} has been updated to professional status."}
