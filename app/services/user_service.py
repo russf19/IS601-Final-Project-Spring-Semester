@@ -191,11 +191,19 @@ class UserService:
     
     @classmethod
     async def unlock_user_account(cls, session: AsyncSession, user_id: UUID) -> bool:
-        user = await cls.get_by_id(session, user_id)
-        if user and user.is_locked:
-            user.is_locked = False
-            user.failed_login_attempts = 0  # Optionally reset failed login attempts
-            session.add(user)
-            await session.commit()
-            return True
-        return False
+        try:
+            user = await cls.get_by_id(session, user_id)
+            if user and user.is_locked:
+                user.is_locked = False
+                user.failed_login_attempts = 0  # Reset failed login attempts
+                session.add(user)
+                await session.commit()
+                logger.info(f"User account {user_id} unlocked successfully.")
+                return True
+            else:
+                logger.info(f"No action taken. User account {user_id} is either not locked or does not exist.")
+                return False
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to unlock user account {user_id}. Error: {e}")
+            await session.rollback()
+            return False
