@@ -170,7 +170,7 @@ class UserService:
             user.email_verified = True
             user.verification_token = None  # Clear the token once used
             if user.role == UserRole.ANONYMOUS:
-                user.role - UserRole.AUTHENTICATED
+                user.role = UserRole.AUTHENTICATED
             session.add(user)
             await session.commit()
             return True
