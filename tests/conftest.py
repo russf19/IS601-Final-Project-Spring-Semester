@@ -45,12 +45,6 @@ engine = create_async_engine(TEST_DATABASE_URL, echo=settings.debug)
 AsyncTestingSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 AsyncSessionScoped = scoped_session(AsyncTestingSessionLocal)
 
-
-@pytest.fixture(scope="module")
-def client():
-    with TestClient(app) as c:
-        yield
-
 @pytest.fixture
 def email_service():
     # Assuming the TemplateManager does not need any arguments for initialization
