@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, null, update, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from app.dependencies import get_email_service, get_settings
 from app.models.user_model import User
 from app.schemas.user_schemas import UserCreate, UserUpdate
@@ -207,3 +208,43 @@ class UserService:
             logger.error(f"Failed to unlock user account {user_id}. Error: {e}")
             await session.rollback()
             return False
+        
+    @classmethod
+    async def get_user_by_id(session: AsyncSession, user_id: UUID) -> User:
+        query = select(User).where(User.id == user_id)
+        results = await session.execute(query)
+        return results.scalars().first()
+    
+    @classmethod
+    async def upgrade_to_professional(session: AsyncSession, user_id: UUID):
+        user = await session.get(User, user_id)
+        if user:
+            user.is_professional = True
+            user.professional_status_updated_at = datetime.utcnow()  # Explicitly setting the update time
+            session.add(user)
+            await session.commit()
+            return True
+        return False
+    
+    @classmethod
+    async def update_user_profile(cls, db: AsyncSession, user_id: UUID, profile_data: Dict[str, str]) -> Optional[User]:
+        try:
+            user = await cls.get_by_id(db, user_id)
+            if not user:
+                logger.error(f"User with ID {user_id} not found for update.")
+                return None
+
+            # Applying updates
+            for key, value in profile_data.items():
+                if hasattr(user, key) and value is not None:
+                    setattr(user, key, value)
+
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)  # Refresh to load the updated data
+            logger.info(f"User {user_id} profile updated successfully.")
+            return user
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to update user {user_id}: {e}")
+            await db.rollback()
+            return None

@@ -33,20 +33,19 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={"WWW-Authenticate": "Bearer"}
     )
     payload = decode_token(token)
     if payload is None:
         raise credentials_exception
-    user_id: str = payload.get("sub")
-    user_role: str = payload.get("role")
-    if user_id is None or user_role is None:
+    user_id = payload.get("sub")
+    if not user_id:
         raise credentials_exception
-    return {"user_id": user_id, "role": user_role}
-
-def require_role(role: str):
+    return {"user_id": user_id, "role": payload.get("role")}
+    
+def require_role(allowed_roles: list):
     def role_checker(current_user: dict = Depends(get_current_user)):
-        if current_user["role"] not in role:
-            raise HTTPException(status_code=403, detail="Operation not permitted")
+        if current_user["role"] not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
         return current_user
     return role_checker

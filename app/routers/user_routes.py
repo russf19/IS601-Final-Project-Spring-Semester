@@ -24,6 +24,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 from app.dependencies import get_current_user, get_db, get_email_service, require_role
 from app.schemas.pagination_schema import EnhancedPagination
 from app.schemas.token_schema import TokenResponse
@@ -33,28 +34,30 @@ from app.services.jwt_service import create_access_token
 from app.utils.link_generation import create_user_links, generate_pagination_links
 from app.dependencies import get_settings
 from app.services.email_service import EmailService
+from app.utils.template_manager import TemplateManager
+from app.services import email_service
+from app.models.user_model import User
+import logging
+
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 settings = get_settings()
-@router.get("/users/{user_id}", response_model=UserResponse, name="get_user", tags=["User Management Requires (Admin or Manager Roles)"])
-async def get_user(user_id: UUID, request: Request, db: AsyncSession = Depends(get_db), token: str = Depends(oauth2_scheme), current_user: dict = Depends(require_role(["ADMIN", "MANAGER"]))):
-    """
-    Endpoint to fetch a user by their unique identifier (UUID).
 
-    Utilizes the UserService to query the database asynchronously for the user and constructs a response
-    model that includes the user's details along with HATEOAS links for possible next actions.
+# Setup logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
-    Args:
-        user_id: UUID of the user to fetch.
-        request: The request object, used to generate full URLs in the response.
-        db: Dependency that provides an AsyncSession for database access.
-        token: The OAuth2 access token obtained through OAuth2PasswordBearer dependency.
-    """
+@router.get("/users/{user_id}", response_model=UserResponse, tags=["User Management Requires (Admin or Manager Roles)"])
+async def get_user(user_id: UUID, request: Request, db: AsyncSession = Depends(get_db), current_user: dict = Depends(require_role(["ADMIN", "MANAGER"]))):
     user = await UserService.get_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    # Assuming create_user_links generates a dictionary of links related to the user
+    links = create_user_links(user.id, request)
 
-    return UserResponse.model_construct(
+    # Construct the response manually if you don't have a model_construct method
+    response = UserResponse(
         id=user.id,
         nickname=user.nickname,
         first_name=user.first_name,
@@ -68,8 +71,11 @@ async def get_user(user_id: UUID, request: Request, db: AsyncSession = Depends(g
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
-        links=create_user_links(user.id, request)  
+        is_professional=user.is_professional if hasattr(user, 'is_professional') else None,
+        professional_status_updated_at=user.professional_status_updated_at if hasattr(user, 'professional_status_updated_at') else None,
+        links=links
     )
+    return response
 
 # Additional endpoints for update, delete, create, and list users follow a similar pattern, using
 # asynchronous database operations, handling security with OAuth2PasswordBearer, and enhancing response
@@ -105,6 +111,8 @@ async def update_user(user_id: UUID, user_update: UserUpdate, request: Request, 
         linkedin_profile_url=updated_user.linkedin_profile_url,
         created_at=updated_user.created_at,
         updated_at=updated_user.updated_at,
+        is_professional=user.is_professional if hasattr(user, 'is_professional') else None,
+        professional_status_updated_at=user.professional_status_updated_at if hasattr(user, 'professional_status_updated_at') else None,
         links=create_user_links(updated_user.id, request)
     )
 
@@ -191,28 +199,27 @@ async def list_users(
         links=pagination_links  # Ensure you have appropriate logic to create these links
     )
 
-
 @router.post("/register/", response_model=UserResponse, tags=["Login and Registration"])
 async def register(user_data: UserCreate, session: AsyncSession = Depends(get_db), email_service: EmailService = Depends(get_email_service)):
-    user = await UserService.register_user(session, user_data.model_dump(), email_service)
+    user = await UserService.register_user(session, user_data.dict(), email_service)
     if user:
-        return user
+        # Make sure `is_professional` is not set here unless explicitly intended
+        return UserResponse.model_construct(...)
     raise HTTPException(status_code=400, detail="Email already exists")
 
 @router.post("/login/", response_model=TokenResponse, tags=["Login and Registration"])
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_db)):
-    if await UserService.is_account_locked(session, form_data.username):
-        raise HTTPException(status_code=400, detail="Account locked due to too many failed login attempts.")
-
     user = await UserService.login_user(session, form_data.username, form_data.password)
     if user:
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-
+        user_data = {
+            "sub": str(user.id),  # user's UUID
+            "role": str(user.role.name)  # user's role
+        }
         access_token = create_access_token(
-            data={"sub": user.email, "role": str(user.role.name)},
+            data=user_data,
             expires_delta=access_token_expires
         )
-
         return {"access_token": access_token, "token_type": "bearer"}
     raise HTTPException(status_code=401, detail="Incorrect email or password.")
 
@@ -233,9 +240,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Async
         return {"access_token": access_token, "token_type": "bearer"}
     raise HTTPException(status_code=401, detail="Incorrect email or password.")
 
-
 @router.get("/verify-email/{user_id}/{token}", status_code=status.HTTP_200_OK, name="verify_email", tags=["Login and Registration"])
-async def verify_email(user_id: UUID, token: str, db: AsyncSession = Depends(get_db), email_service: EmailService = Depends(get_email_service)):
+async def verify_email(user_id: UUID, token: str, db: AsyncSession = Depends(get_db), email_service: email_service = Depends(get_email_service)):
     """
     Verify user's email with a provided token.
     
@@ -246,39 +252,35 @@ async def verify_email(user_id: UUID, token: str, db: AsyncSession = Depends(get
         return {"message": "Email verified successfully"}
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
 
-@router.patch("/users/(user_id)/profile" , response_model=UserResponse, tags=["User Profile Management"])
-async def update_profile(user_id: UUID, profile_data: UserUpdate, request: Request, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    """
-    Allows a user to update their profile fields such as name, bio, and location.
-    """
-    if user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized to update this profile")
-    
-    updated_user = await UserService.update(db, user_id, profile_data.dict(exclude_unset=True))
-    if not updated_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    
-    return UserResponse.model_construct(
-        **updated_user.dict(),
-        links=create_user_links(updated_user.id, request)
-    )
 
-# Upgrade to professional status endpoint
-@router.post("/users/{user_id}/upgrade", tags=["User Management Requires (Admin or Manager Roles)"], status_code=status.HTTP_200_OK)
-async def upgrade_user_to_professional(user_id: UUID, db: AsyncSession = Depends(get_db), current_user: dict = Depends(require_role(["ADMIN", "MANAGER"]))):
-    """
-    Endpoint for managers and admins to upgrade a user to professional status.
-    """
-    user = await UserService.get_by_id(db, user_id)
+@router.patch("/users/{user_id}/profile", response_model=UserResponse, tags=["User Profile Management"])
+async def update_profile(user_id: UUID, profile_data: UserUpdate, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    logger.debug(f"Current user details: {current_user}")
+    if str(user_id) != current_user['user_id']:
+        logger.error(f"Unauthorized access attempt by {current_user.get('user_id')} for user {user_id}")
+        raise HTTPException(status_code=403, detail=f"Unauthorized to update this profile: {user_id} vs {current_user.get('user_id')}")
+    updated_user = await UserService.update_user_profile(db, user_id, profile_data.dict(exclude_unset=True))
+    if not updated_user:
+        logger.error(f"User not found: {user_id}")
+        raise HTTPException(status_code=404, detail="User not found")
+    return updated_user
+
+@router.post("/users/{user_id}/upgrade", status_code=status.HTTP_200_OK, tags=["Professional Status"])
+async def upgrade_user_to_professional(user_id: UUID, db: AsyncSession = Depends(get_db), email_service: EmailService = Depends(get_email_service), current_user: dict = Depends(require_role(["ADMIN", "MANAGER"]))):
+    user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    
-    user.is_professional = True  # Assuming 'is_professional' is a valid attribute of the User model
-    db.add(user)
+
+    if user.is_professional:
+        return {"message": f"User {user_id} is already a professional."}
+
+    user.is_professional = True
+    db.add(user)  # This is usually not needed as the user is already part of the session
     await db.commit()
 
-    # Notify the user
-    email_service = get_email_service()
-    await email_service.send_notification(user.email, "Your professional status has been updated.")
+    await email_service.send_user_email({
+        "name": user.first_name,
+        "email": user.email
+    }, 'professional_upgrade')  # Ensure there is a template named 'professional_upgrade'
 
-    return {"message": f"User {user_id} has been updated to professional status."}
+    return {"message": f"User {user_id} has been upgraded to professional status and notified."}
