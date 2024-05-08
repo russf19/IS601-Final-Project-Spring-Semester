@@ -22,6 +22,7 @@ from builtins import dict, int, len, str
 from datetime import timedelta
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
@@ -240,18 +241,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Async
         return {"access_token": access_token, "token_type": "bearer"}
     raise HTTPException(status_code=401, detail="Incorrect email or password.")
 
-@router.get("/verify-email/{user_id}/{token}", status_code=status.HTTP_200_OK, name="verify_email", tags=["Login and Registration"])
-async def verify_email(user_id: UUID, token: str, db: AsyncSession = Depends(get_db), email_service: email_service = Depends(get_email_service)):
-    """
-    Verify user's email with a provided token.
-    
-    - **user_id**: UUID of the user to verify.
-    - **token**: Verification token sent to the user's email.
-    """
+@router.get("/verify-email/{user_id}/{token}", name="verify_email", tags=["Login and Registration"])
+async def verify_email(user_id: UUID, token: str, db: AsyncSession = Depends(get_db)):
     if await UserService.verify_email_with_token(db, user_id, token):
-        return {"message": "Email verified successfully"}
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
-
+        return HTMLResponse(content="<html><body><h1>Email Verification Successful</h1><p>Your email has been verified. You may now close this tab or <a href='/login'>login</a>.</p></body></html>", status_code=status.HTTP_200_OK)
+    else:
+        return HTMLResponse(content="<html><body><h1>Email Verification Failed</h1><p>Unable to verify your email. The link may be expired or invalid. Please request a new verification link or contact support.</p></body></html>", status_code=status.HTTP_400_BAD_REQUEST)
 
 @router.patch("/users/{user_id}/profile", response_model=UserResponse, tags=["User Profile Management"])
 async def update_profile(user_id: UUID, profile_data: UserUpdate, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
@@ -275,12 +270,14 @@ async def upgrade_user_to_professional(user_id: UUID, db: AsyncSession = Depends
         return {"message": f"User {user_id} is already a professional."}
 
     user.is_professional = True
-    db.add(user)  # This is usually not needed as the user is already part of the session
-    await db.commit()
+    await db.commit()  # Persist changes
 
-    await email_service.send_user_email({
+    # Prepare the user data for sending the email
+    user_data = {
         "name": user.first_name,
         "email": user.email
-    }, 'professional_upgrade')  # Ensure there is a template named 'professional_upgrade'
+    }
+    # Send the professional upgrade email
+    await email_service.send_user_email(user_data, 'professional_upgrade')
 
     return {"message": f"User {user_id} has been upgraded to professional status and notified."}

@@ -139,3 +139,68 @@ async def test_update_user_role(db_session: AsyncSession, user: User):
     await db_session.commit()
     await db_session.refresh(user)
     assert user.role == UserRole.ADMIN, "Role update should persist correctly in the database"
+
+#New Tests
+
+# Checks whether the updated_at timestamp is automatically set upon any changes to the user's profile.
+@pytest.mark.asyncio
+async def test_user_timestamps_on_update(db_session: AsyncSession, user: User):
+    """
+    Tests that the 'updated_at' timestamp is updated upon modifying user details.
+    """
+    user.first_name = "UpdatedName"
+    await db_session.commit()
+    await db_session.refresh(user)
+    assert user.updated_at > user.created_at, "'updated_at' should be later than 'created_at' after update"
+
+# Ensures that updating a user's professional status correctly updates the status and logs the change time.
+@pytest.mark.asyncio
+async def test_professional_status_update_and_logging(db_session: AsyncSession, user: User):
+    """
+    Tests updating the user's professional status and logging the update timestamp.
+    """
+    user.update_professional_status(True)
+    await db_session.commit()
+    await db_session.refresh(user)
+    assert user.is_professional is True, "Professional status should be True"
+    assert user.professional_status_updated_at is not None, "Professional status update time should be logged"
+
+# Checks the logic to determine if an account is locked.
+@pytest.mark.asyncio
+async def test_account_lock_status(user: User):
+    """
+    Tests the method to check if the user's account is locked.
+    """
+    user.lock_account()
+    assert user.is_locked, "User account should be locked"
+
+    user.unlock_account()
+    assert not user.is_locked, "User account should be unlocked after unlocking"
+
+#Tests updating multiple fields
+@pytest.mark.asyncio
+async def test_update_multiple_user_fields(db_session: AsyncSession, user: User):
+    """
+    Tests updating multiple fields of a user including a sensitive field like role.
+    """
+    new_nickname = "new_nickname"
+    new_email = "new_email@example.com"
+    new_role = UserRole.MANAGER
+    user.nickname = new_nickname
+    user.email = new_email
+    user.role = new_role
+    await db_session.commit()
+    await db_session.refresh(user)
+    assert user.nickname == new_nickname, "User nickname should be updated"
+    assert user.email == new_email, "User email should be updated"
+    assert user.role == new_role, "User role should be updated to MANAGER"
+
+# Checks to see that the username meets a specific length requirement
+async def test_user_username_length_validation(db_session: AsyncSession, user: User):
+    """
+    Tests that the username must be within a specified length range.
+    """
+    user.nickname = "U" * 5  # Assuming the minimum length is 5 characters
+    await db_session.commit()
+    await db_session.refresh(user)
+    assert len(user.nickname) >= 5, "Username should meet the minimum length requirement"

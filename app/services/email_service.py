@@ -19,14 +19,18 @@ class EmailService:
         subject_map = {
             'email_verification': "Verify Your Account",
             'password_reset': "Password Reset Instructions",
-            'account_locked': "Account Locked Notification"
+            'account_locked': "Account Locked Notification",
+            'professional_upgrade': "You have been upgraded to Professional status"
         }
 
         if email_type not in subject_map:
             raise ValueError("Invalid email type")
 
-        html_content = self.template_manager.render_template(email_type, **user_data)
-        self.smtp_client.send_email(subject_map[email_type], html_content, user_data['email'])
+        try:
+            html_content = self.template_manager.render_template(email_type, **user_data)
+            self.smtp_client.send_email(subject_map[email_type], html_content, user_data['email'])
+        except Exception as e:
+            print(f"Failed to send email: {e}")  # Better logging or error management can be implemented here
 
     async def send_verification_email(self, user: User):
         verification_url = f"{settings.server_base_url}verify-email/{user.id}/{user.verification_token}"

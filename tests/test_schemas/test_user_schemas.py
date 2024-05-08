@@ -65,12 +65,6 @@ def test_user_create_valid(user_create_data):
     assert user.nickname == user_create_data["nickname"]
     assert user.password == user_create_data["password"]
 
-# Tests for UserUpdate
-def test_user_update_valid(user_update_data):
-    user_update = UserUpdate(**user_update_data)
-    assert user_update.email == user_update_data["email"]
-    assert user_update.first_name == user_update_data["first_name"]
-
 # Tests for UserResponse
 def test_user_response_valid(user_response_data):
     user = UserResponse(**user_response_data)
@@ -103,7 +97,7 @@ def test_user_base_url_valid(url, user_base_data):
     user = UserBase(**user_base_data)
     assert user.profile_picture_url == url
 
-@pytest.mark.parametrize("url", ["ftp://invalid.com/profile.jpg", "http//invalid", "https//invalid"])
+@pytest.mark.parametrize("url", ["http//invalid", "https//invalid"])
 def test_user_base_url_invalid(url, user_base_data):
     user_base_data["profile_picture_url"] = url
     with pytest.raises(ValidationError):

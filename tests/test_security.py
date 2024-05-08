@@ -2,6 +2,7 @@
 from builtins import RuntimeError, ValueError, isinstance, str
 import pytest
 from app.utils.security import hash_password, verify_password
+import time
 
 def test_hash_password():
     """Test that hashing password returns a bcrypt hashed string."""
@@ -65,3 +66,16 @@ def test_hash_password_internal_error(monkeypatch):
     with pytest.raises(ValueError):
         hash_password("test")
 
+# New test to see if password verifcation takes the same amount of time each time
+def test_password_verification_timing():
+    password = "timing_password"
+    hashed = hash_password(password)
+    start_time = time.time()
+    verify_password(password, hashed)
+    duration_first = time.time() - start_time
+
+    wrong_password = "wrong_timing_password"
+    start_time = time.time()
+    verify_password(wrong_password, hashed)
+    duration_second = time.time() - start_time
+    assert abs(duration_first - duration_second) < 0.05, "Password verification timing should be consistent"

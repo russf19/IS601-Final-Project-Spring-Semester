@@ -1,9 +1,6 @@
-# smtp_client.py
-from builtins import Exception, int, str
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from settings.config import settings
 import logging
 
 class SMTPClient:
@@ -13,19 +10,21 @@ class SMTPClient:
         self.username = username
         self.password = password
 
-    def send_email(self, subject: str, html_content: str, recipient: str):
+    def send_email(self, subject: str, content: str, recipient: str, content_type='html'):
         try:
-            message = MIMEMultipart('alternative')
+            message = MIMEMultipart()
             message['Subject'] = subject
             message['From'] = self.username
             message['To'] = recipient
-            message.attach(MIMEText(html_content, 'html'))
+            # Set the body of the email
+            message.attach(MIMEText(content, content_type))
 
             with smtplib.SMTP(self.server, self.port) as server:
-                server.starttls()  # Use TLS
+                server.starttls()  # Ensure using TLS
                 server.login(self.username, self.password)
-                server.sendmail(self.username, recipient, message.as_string())
+                server.send_message(message)  # Use send_message to handle MIME objects
             logging.info(f"Email sent to {recipient}")
         except Exception as e:
             logging.error(f"Failed to send email: {str(e)}")
             raise
+        
